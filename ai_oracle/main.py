@@ -9,6 +9,8 @@ import os
 import json
 import time
 import uuid
+import chromadb
+import ollama
 
 
 app = typer.Typer(help="Ai_Oracle: Simple CLI AI assistant", no_args_is_help=True)
@@ -83,6 +85,108 @@ def long_talk():
         else:   
             ask(prompt, userId, "llama3.2")
     
+
+@app.command()
+def code_talk(
+    prompt: str = typer.Argument(..., help="Ask questions about your codebase"),
+    userId: str = typer.Option("", "--user-id", "-u", help="User ID"),
+    model: str = typer.Option("llama3.2", "--model", "-m", help="Used model"),
+    db_dir: str = typer.Option(os.path.expanduser("~/.ai_oracle/chroma_data"), "--db-dir", help="Chroma DB path"),
+    collection_name: str = typer.Option("documents", "--collection", help="Chroma collection"),
+    embed_model: str = typer.Option("nomic-embed-text", "--embed", help="Embedding model")
+):
+    """Talk based on code base retrieving data from ChromaDB. 
+    It executes a semantic mathematical search, mixed with a structural substring search."""
+    try:
+        # Load the Chroma collection with our explicit embedding model. 
+        # By providing `embedding_function`, Chroma handles vectorizing the strings automatically.
+        from chromadb.utils import embedding_functions
+        ollama_ef = embedding_functions.OllamaEmbeddingFunction(
+            url="http://localhost:11434/api/embeddings",
+            model_name=embed_model,
+        )
+        chroma_client = chromadb.PersistentClient(path=db_dir)
+        collection = chroma_client.get_collection(name=collection_name, embedding_function=ollama_ef)
+    except Exception as e:
+        console.print(f"[bold red]Error connecting to ChromaDB at '{db_dir}':[/bold red] {e}")
+        return
+        
+    import re
+    
+    # RAG Vector Search handles natural language (e.g. "What parses text data?"), but it handles 
+    # exact terms poorly (e.g. "FileProcessingService.java" might fail against pure math distances).
+    # We supplement standard text similarity by extracting CamelCase class names or .java file names...
+    keywords = set(re.findall(r'\b[A-Z][a-zA-Z0-9_]+\b|\b[a-zA-Z0-9_]+\.[a-zA-Z0-9]+\b', prompt))
+    
+    # ... and discarding common english words that triggered the CamelCase Regex.
+    stop_words = {"How", "What", "Why", "When", "Where", "Which", "Who", "Can", "Could", "Would", "Should", "Is", "Are", "Do", "Does", "Did", "The", "A", "An", "Please", "Show", "Tell"}
+    keywords = [kw for kw in keywords if kw not in stop_words]
+
+    retrieved_documents = []
+    retrieved_metadatas = []
+
+    # 1. Semantic Embedding Search
+    # "Which file queries the database?"
+    results = collection.query(
+        query_texts=[prompt],
+        n_results=15
+    )
+    if results['documents'] and results['documents'][0]:
+        retrieved_documents.extend(results['documents'][0])
+        retrieved_metadatas.extend(results['metadatas'][0])
+
+    # 2. Strict Keyword Matching
+    # "Does PostgresRepository.java exist in the codebase?"
+    for kw in keywords:
+        try:
+            # We filter chunks physically containing the string kw (like 'PostgresRepository') natively at the SQLite level
+            kw_results = collection.get(
+                where_document={"$contains": kw},
+                limit=10
+            )
+            if kw_results['documents']:
+                retrieved_documents.extend(kw_results['documents'])
+                retrieved_metadatas.extend(kw_results['metadatas'])
+        except Exception as e:
+            pass
+
+    retrieved_context = ""
+    seen_chunks = set()
+    
+    # Combine the semantic chunks and the string-matched chunks together into the prompt.
+    for doc, meta in zip(retrieved_documents, retrieved_metadatas):
+        source = meta.get('source', 'Unknown')
+        chunk_index = meta.get('chunk_index', 0)
+        
+        # De-duplicate chunks since dense-search and string-search might retrieve the exact same block.
+        chunk_id_key = f"{source}_{chunk_index}"
+        if chunk_id_key not in seen_chunks:
+            seen_chunks.add(chunk_id_key)
+            # Add a clear separator marking where the code block came from for the LLM.
+            retrieved_context += f"\n--- Source: {source} ---\n{doc}\n"
+            
+    if not retrieved_context:
+        console.print("[yellow]No relevant context found in the vector database.[/yellow]")
+        return
+        
+
+    # Compose the final context-heavy prompt using the user's original chat inputs plus our 
+    # freshly curated VectorDB code slices so it's impossible for the LLM to hallucinate.
+    augmented_prompt = (
+        f"Answer the user's question based on the following code context.\n\n"
+        f"CONTEXT:\n{retrieved_context}\n\n"
+        f"QUESTION: {prompt}"
+    )
+
+    with DBClient() as db:
+        chat_context = db.get_context(userId)
+        
+        full_response = ask_internal(augmented_prompt, chat_context, model)
+    
+        db.add_context(userId, "user", prompt)
+        db.add_context(userId, "assistant", full_response)
+
+    return full_response
 
 
 if __name__ == "__main__":

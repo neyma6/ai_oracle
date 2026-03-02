@@ -7,7 +7,7 @@ class AIClient:
     def stream_chat(self, prompt: str, context: list = []):
         
         messages = context + [
-            {'role': 'system', 'content': 'You are a helpful assistant. You only give a short sentence by answer.'},
+            {'role': 'system', 'content': 'You are a helpful software engineer assistant. You only give a short sentence by answer and you provide code snippets if it is needed.'},
             {'role': 'user', 'content': prompt}
         ]
         
