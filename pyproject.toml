@@ -18,7 +18,10 @@ dependencies = [
     "psycopg2-binary",
     "yoyo-migrations",
     "chromadb",
-    "langchain-text-splitters"
+    "langchain-text-splitters",
+    "opencv-python",
+    "Pillow",
+    "ultralytics",
 ]
 
 [project.scripts]
