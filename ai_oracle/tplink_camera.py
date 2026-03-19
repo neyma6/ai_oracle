@@ -9,7 +9,8 @@ console = Console()
 class TpLinkCamera:
     """Connects to a TP-Link (Tapo/Kasa) camera via RTSP and provides the video stream."""
 
-    def __init__(self, ip_address=None):
+    def __init__(self, ip_address=None, video_file=None):
+        self.video_file = video_file
         self.username, self.password, file_ip = self._load_credentials()
         # Default to IP from file (if any), then provided arg, then env var, then default 192.168.1.100
         self.ip_address = file_ip or ip_address or os.environ.get("TPLINK_CAMERA_IP", "192.168.1.100")
@@ -49,21 +50,46 @@ class TpLinkCamera:
             for frame in camera.get_stream():
                 ...
         """
-        rtsp_url = self.get_rtsp_url()
-        console.print(f"[cyan]Connecting to TP-Link camera stream at {self.ip_address}...[/cyan]")
+        cap = None
+        fps = 30
+        is_local_file = False
         
-        # We use cv2.CAP_FFMPEG for network streams to reduce latency in OpenCV
-        cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+        if self.video_file:
+            rtsp_url = self.video_file
+            console.print(f"[cyan]Playing local video file {self.video_file}...[/cyan]")
+            # Do not use FFMPEG backend flag exclusively for local files
+            cap = cv2.VideoCapture(rtsp_url)
+            is_local_file = True
+            file_fps = cap.get(cv2.CAP_PROP_FPS)
+            if file_fps > 0:
+                fps = file_fps
+        else:
+            rtsp_url = self.get_rtsp_url()
+            console.print(f"[cyan]Connecting to TP-Link camera stream at {self.ip_address}...[/cyan]")
+            # We use cv2.CAP_FFMPEG for network streams to reduce latency in OpenCV
+            cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+            
         if not cap.isOpened():
-            raise RuntimeError(f"Could not open TP-Link camera stream at {self.ip_address}")
+            raise RuntimeError(f"Could not open TP-Link camera stream or file at {rtsp_url}")
+
+        import time
+        frame_delay = 1.0 / fps if is_local_file else 0
 
         try:
             while True:
+                start_time = time.time()
+                
                 ret, frame = cap.read()
                 if not ret:
-                    console.print("[yellow]Warning: Camera stream disconnected.[/yellow]")
+                    console.print("[yellow]Warning: Camera stream disconnected or video ended.[/yellow]")
                     break
                 yield frame
+                
+                if is_local_file:
+                    elapsed = time.time() - start_time
+                    sleep_time = frame_delay - elapsed
+                    if sleep_time > 0:
+                        time.sleep(sleep_time)
         finally:
             cap.release()
             

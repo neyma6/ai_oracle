@@ -9,7 +9,7 @@ console = Console()
 class ImageProcessor:
     """Detects people in an image using face detection and crops to include them."""
 
-    def __init__(self, padding_factor=0.8, scale_factor=0.75):
+    def __init__(self, padding_factor=0.8, scale_factor=0.4):
         """
         Args:
             padding_factor: Multiplier around detected face to include upper body.

@@ -7,6 +7,7 @@ A Python project for AI Oracle.
 
 ```bash
 source venv/bin/activate
+source venv_brew2/bin/activate
 pip install -e .
 ```
 

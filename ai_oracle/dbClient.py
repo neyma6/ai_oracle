@@ -1,5 +1,6 @@
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from datetime import datetime, timedelta
 import logging
 
 logging.basicConfig(level=logging.WARNING)
@@ -79,6 +80,108 @@ class DBClient:
                 self.connection.rollback()
             logger.error(f"Error clearing context: {e}")
             raise
+
+    # ── Event Log persistence ──────────────────────────────────────────
+
+    def save_event_log(self, time_str, classification, confidence, image_data=None):
+        """Persist a single classification event to the database and return its id."""
+        self.connect()
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO event_logs (time_str, classification, confidence, image_data) VALUES (%s, %s, %s, %s) RETURNING id",
+                    (time_str, classification, confidence, image_data)
+                )
+                log_id = cursor.fetchone()[0]
+                self.connection.commit()
+                return log_id
+        except psycopg2.Error as e:
+            if self.connection:
+                self.connection.rollback()
+            logger.error(f"Error saving event log: {e}")
+
+    def load_event_logs(self):
+        """Load event logs from today and yesterday."""
+        self.connect()
+        try:
+            yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+            with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    "SELECT id, time_str, classification, confidence, created_at "
+                    "FROM event_logs WHERE created_at >= %s ORDER BY created_at ASC",
+                    (yesterday,)
+                )
+                return cursor.fetchall()
+        except psycopg2.Error as e:
+            if self.connection:
+                self.connection.rollback()
+            logger.error(f"Error loading event logs: {e}")
+            return []
+
+    def get_event_image(self, log_id):
+        """Load image data for a specific event log."""
+        self.connect()
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute("SELECT image_data FROM event_logs WHERE id = %s", (log_id,))
+                row = cursor.fetchone()
+                return bytes(row[0]) if row and row[0] is not None else None
+        except psycopg2.Error as e:
+            if self.connection:
+                self.connection.rollback()
+            logger.error(f"Error loading event image: {e}")
+            return None
+
+    # ── AI Analysis persistence ────────────────────────────────────────
+
+    def save_ai_analysis(self, time_str, result_text, image_data=None):
+        """Persist an AI analysis result to the database and return its id."""
+        self.connect()
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO ai_analyses (time_str, result_text, image_data) VALUES (%s, %s, %s) RETURNING id",
+                    (time_str, result_text, image_data)
+                )
+                log_id = cursor.fetchone()[0]
+                self.connection.commit()
+                return log_id
+        except psycopg2.Error as e:
+            if self.connection:
+                self.connection.rollback()
+            logger.error(f"Error saving AI analysis: {e}")
+
+    def load_ai_analyses(self):
+        """Load AI analysis results from today and yesterday."""
+        self.connect()
+        try:
+            yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+            with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    "SELECT id, time_str, result_text, created_at "
+                    "FROM ai_analyses WHERE created_at >= %s ORDER BY created_at ASC",
+                    (yesterday,)
+                )
+                return cursor.fetchall()
+        except psycopg2.Error as e:
+            if self.connection:
+                self.connection.rollback()
+            logger.error(f"Error loading AI analyses: {e}")
+            return []
+
+    def get_ai_image(self, log_id):
+        """Load image data for a specific AI analysis."""
+        self.connect()
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute("SELECT image_data FROM ai_analyses WHERE id = %s", (log_id,))
+                row = cursor.fetchone()
+                return bytes(row[0]) if row and row[0] is not None else None
+        except psycopg2.Error as e:
+            if self.connection:
+                self.connection.rollback()
+            logger.error(f"Error loading AI image: {e}")
+            return None
 
     def __enter__(self):
         self.connect()

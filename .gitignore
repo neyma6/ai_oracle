@@ -6,3 +6,20 @@ __pycache__/
 ai_oracle.egg-info/
 context/
 .DS_Store
+build/
+
+# Video test files
+*.mov
+*.mp4
+*.avi
+
+# YOLO model weights
+*.pt
+
+# One-off test/debug scripts
+test_*.py
+clear_db.py
+
+# Temp images
+*.jpg
+*.png

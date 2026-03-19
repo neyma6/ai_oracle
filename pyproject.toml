@@ -22,6 +22,9 @@ dependencies = [
     "opencv-python",
     "Pillow",
     "ultralytics",
+    "torch",
+    "torchvision",
+    "open-clip-torch>=2.20.0"
 ]
 
 [project.scripts]
