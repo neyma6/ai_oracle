@@ -4,9 +4,9 @@ class AIClient:
     def __init__(self, model: str = "llama3.2"):
         self.model = model
 
-    def stream_chat(self, prompt: str, context: list = []):
-        
-        messages = context + [
+    def stream_chat(self, prompt: str, context: list | None = None):
+        safe_context = context if context is not None else []
+        messages = safe_context + [
             {'role': 'system', 'content': 'You are a helpful software engineer assistant. You only give a short sentence by answer and you provide code snippets if it is needed.'},
             {'role': 'user', 'content': prompt}
         ]

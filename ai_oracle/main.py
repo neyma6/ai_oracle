@@ -19,14 +19,15 @@ ai = AIClient()
 
 def ask_internal(
     prompt: str = typer.Argument(..., help="A kérdésed az AI-hoz"),
-    context: list = typer.Argument([], help="Context"),
+    context: list | None = typer.Argument(None, help="Context"),
     model: str = typer.Option("llama3.2", "--model", "-m", help="Használt modell")
 ):
     ai.model = model
     full_response = ""
+    safe_context = context if context is not None else []
 
     with Live(Markdown(""), console=console, refresh_per_second=10) as live:
-        for chunk in ai.stream_chat(prompt, context):
+        for chunk in ai.stream_chat(prompt, safe_context):
             full_response += chunk
             live.update(Markdown(full_response))
 
@@ -150,7 +151,7 @@ def code_talk(
         except Exception as e:
             pass
 
-    retrieved_context = ""
+    retrieved_context: str = ""
     seen_chunks = set()
     
     # Combine the semantic chunks and the string-matched chunks together into the prompt.

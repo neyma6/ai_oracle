@@ -260,7 +260,8 @@ class VisionApp(tk.Tk):
         # Persist to database
         if persist and self.db_client:
             try:
-                log_id = self.db_client.save_event_log(time_str, classification, confidence, image_bytes)
+                event_date = datetime.now().date().isoformat()
+                log_id = self.db_client.save_event_log(time_str, classification, confidence, image_bytes, event_date=event_date)
             except Exception as e:
                 print(f"[DB] Error saving event log: {e}")
 
@@ -300,7 +301,8 @@ class VisionApp(tk.Tk):
         # Persist to database
         if persist and self.db_client:
             try:
-                log_id = self.db_client.save_ai_analysis(time_str, result_text, image_bytes)
+                event_date = datetime.now().date().isoformat()
+                log_id = self.db_client.save_ai_analysis(time_str, result_text, image_bytes, event_date=event_date)
             except Exception as e:
                 print(f"[DB] Error saving AI analysis: {e}")
 
@@ -548,44 +550,48 @@ class VisionApp(tk.Tk):
                                          'total', 'number of', 'how often', 'how much'}
                     is_counting_query = any(kw in prompt.lower() for kw in counting_keywords)
 
-                    all_results = rag.collection.get(include=["metadatas"])
+                    # Detect if the user is asking about today/yesterday for filtering
+                    date_filter = None
+                    if 'today' in prompt.lower():
+                        date_filter = datetime.now().date().isoformat()
+                    elif 'yesterday' in prompt.lower():
+                        from datetime import timedelta
+                        date_filter = (datetime.now() - timedelta(days=1)).date().isoformat()
+
+                    # Fetch all historical records (up to a large limit) to ensure we see both today and yesterday
+                    all_results = rag.collection.get(include=["metadatas"], limit=10000)
                     all_metas = all_results.get("metadatas", [])
-                    total_event_count = sum(1 for m in all_metas if m and "description" in m)
+                    # Reverse so we see the most recent events FIRST (prioritize today over yesterday)
+                    all_metas_reversed = list(reversed(all_metas))
+                    
+                    # Apply date filter manually for counting if requested
+                    if date_filter:
+                        all_metas_reversed = [m for m in all_metas_reversed if m.get('date') == date_filter]
+
+                    total_event_count = sum(1 for m in all_metas_reversed if m and "description" in m)
 
                     if is_counting_query:
                         # For counting queries: provide a compact summary
                         # Deduplicate similar descriptions to save tokens, but keep full count
                         seen = set()
                         unique_descs = []
-                        for m in all_metas:
+                        for m in all_metas_reversed:
                             if m and "description" in m:
                                 d = m["description"]
                                 # Use first 60 chars as dedup key
                                 key = d[:60]
                                 if key not in seen:
                                     seen.add(key)
-                                    unique_descs.append(f"[{m.get('time_str', '?')}] {d}")
-                                    if len(unique_descs) >= 20:  # cap unique samples
+                                    # Include date and time if available
+                                    date_tag = m.get('date', '')
+                                    comp_ts = f"{date_tag} {m.get('time_str', '?')}".strip()
+                                    unique_descs.append(f"[{comp_ts}] {d}")
+                                    if len(unique_descs) >= 30:  # increased sample size
                                         break
                         context_lines = unique_descs
                     else:
-                        # For descriptive queries: use semantic similarity via ChromaDB text search
-                        # Fall back to most-recent N entries if collection too small for query
-                        top_k = min(8, total_event_count)
-                        if top_k > 0:
-                            recent = [
-                                m for m in all_metas[-40:]  # only scan last 40 records
-                                if m and "description" in m
-                            ]
-                            # Simple keyword match scoring for text-only search
-                            prompt_words = set(prompt.lower().split())
-                            def score(m):
-                                desc_words = set(m["description"].lower().split())
-                                return len(prompt_words & desc_words)
-                            scored = sorted(recent, key=score, reverse=True)
-                            for m in scored[:top_k]:
-                                ts = m.get("time_str", "?")
-                                context_lines.append(f"[{ts}] {m['description']}")
+                        # Use actual semantic vector search for descriptive queries!
+                        context_lines = rag.search_by_text(prompt, top_k=12, date_filter=date_filter)
 
                 except Exception as e:
                     print(f"[Chat RAG] error: {e}")
@@ -610,11 +616,6 @@ class VisionApp(tk.Tk):
                         "Use this context to answer the user's question."
                     )
                 messages.append({'role': 'system', 'content': system_msg})
-            elif total_event_count == 0:
-                messages.append({
-                    'role': 'system',
-                    'content': "You are a security camera AI assistant. No events have been recorded yet."
-                })
 
             messages.append({'role': 'user', 'content': prompt})
 

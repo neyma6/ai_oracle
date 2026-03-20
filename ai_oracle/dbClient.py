@@ -83,14 +83,17 @@ class DBClient:
 
     # ── Event Log persistence ──────────────────────────────────────────
 
-    def save_event_log(self, time_str, classification, confidence, image_data=None):
+    def save_event_log(self, time_str, classification, confidence, image_data=None, event_date=None):
         """Persist a single classification event to the database and return its id."""
         self.connect()
+        if event_date is None:
+            event_date = datetime.now().date().isoformat()
+            
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute(
-                    "INSERT INTO event_logs (time_str, classification, confidence, image_data) VALUES (%s, %s, %s, %s) RETURNING id",
-                    (time_str, classification, confidence, image_data)
+                    "INSERT INTO event_logs (time_str, classification, confidence, image_data, event_date) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                    (time_str, classification, confidence, image_data, event_date)
                 )
                 log_id = cursor.fetchone()[0]
                 self.connection.commit()
@@ -134,14 +137,17 @@ class DBClient:
 
     # ── AI Analysis persistence ────────────────────────────────────────
 
-    def save_ai_analysis(self, time_str, result_text, image_data=None):
+    def save_ai_analysis(self, time_str, result_text, image_data=None, event_date=None):
         """Persist an AI analysis result to the database and return its id."""
         self.connect()
+        if event_date is None:
+            event_date = datetime.now().date().isoformat()
+            
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute(
-                    "INSERT INTO ai_analyses (time_str, result_text, image_data) VALUES (%s, %s, %s) RETURNING id",
-                    (time_str, result_text, image_data)
+                    "INSERT INTO ai_analyses (time_str, result_text, image_data, event_date) VALUES (%s, %s, %s, %s) RETURNING id",
+                    (time_str, result_text, image_data, event_date)
                 )
                 log_id = cursor.fetchone()[0]
                 self.connection.commit()
